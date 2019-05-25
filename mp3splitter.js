@@ -342,7 +342,7 @@ class Mp3 {
   getHeader (buf) {
     let b, v, bb, cc
 
-    const header = {}
+    const header = { raw: buf }
     if (buf[0] !== 0xff) {
       return false
     }
@@ -443,27 +443,61 @@ class Mp3 {
 }
 
 
-class Mp3splitter {
-  constructor (fileread) {
-    this.infile = fileread
-    this.id3v2 = new Id3v2()
-    this.mp3 = new Mp3()
+// class mp3buffer {
+//   constructor () {
+//     this.buf = new Uint8Array()
+//   }
 
-    // out file
-    this.ofd = null
-    this.onum = 0
+//   append (arr) {
+//     let b
+//     if (arr[0] && typeof arr[0].length !== 'undefined') {
+//       // push array
+//       let newlen = arr.reduce((len, elem) => len + elem.length, this.buf.length)
+//       b = new Uint8Array(newlen)
+//       b.set(this.buf, 0)
+//       arr.reduce((acc, elem) => {
+//         b.set(elem, acc)
+//         return acc + elem.length
+//       }, this.buf.length)
+//     } else {
+//       b = new Uint8Array(this.buf.length + arr.length)
+//       b.set(this.buf, 0)
+//       b.set(arr, this.buf.length)
+//     }
+//     this.buf = b
+//     return b
+//   }
+// }
+
+class U8Array {
+  constructor () {
+    this.blocks = []
   }
 
-  /**
-   * Create a new file for writing
-   * chap: use endtime and subframes
-   */
-  newfile (chap) {
-    if (this.ofd) {
-      fs.closeSync(this.ofd)
-    }
+  push (block) {
+    this.blocks.push(block)
+  }
+
+  render () {
+    let newlen = this.blocks.reduce((len, elem) => len + elem.length, 0)
+    const buf = new Uint8Array(newlen)
+    this.blocks.reduce((acc, elem) => {
+      buf.set(elem, acc)
+      return acc + elem.length
+    }, 0)
+    return buf
+  }
+}
+
+class CurrentFile {
+  // this.buf
+  // this.filename
+
+  constructor (num, chap) {
+    this.buf = new U8Array()
+
+    num++
     const tit2 = chap.subFrames.find(f => f.id === 'TIT2')
-    const num = ++this.onum
     const numpadded = `00${num}`.slice(-(Math.max(3, num.toString().length)))
 
     let fn = numpadded
@@ -471,8 +505,34 @@ class Mp3splitter {
       fn += `-${tit2.data}`
     }
     fn += '.mp3'
-    console.log(`creating ${fn}`)
-    this.ofd = fs.openSync(fn, 'w')
+    this.filename = fn
+  }
+
+  push (arr) {
+    this.buf.push(arr)
+  }
+
+  /**
+   * Create a new file for writing
+   * chap: use endtime and subframes
+   */
+  save () {
+    console.log(`saving ${this.filename}`)
+    const ofd = fs.openSync(this.filename, 'w')
+    fs.writeSync(ofd, this.buf.render())
+    fs.closeSync(ofd)
+  }
+}
+
+
+class Mp3splitter {
+  constructor (fileread) {
+    this.infile = fileread
+    this.id3v2 = new Id3v2()
+    this.mp3 = new Mp3()
+
+    // out file
+    this.onum = 0
   }
 
   go () {
@@ -481,6 +541,7 @@ class Mp3splitter {
     let chapidx = -1
     let cursample = 0
     let curlsample = -1
+    let curFile = null
 
     const id3frames = { first: [], next: [] }
 
@@ -551,12 +612,15 @@ class Mp3splitter {
           this.infile.getNextByte()
           const mp3frame = this.infile.getBytes(mp3header.frameSize - 4)
 
-          if (cursample > curlsample && chaps[chapidx + 1]) {
-            const chap = chaps[++chapidx]
+          if (cursample > curlsample && chaps[++chapidx]) {
+            if (curFile) {
+              curFile.save()
+            }
 
-            // console.log(chap)
-            curlsample = chap.endTime * mp3header.sampleRate / 1000
-            this.newfile(chap)
+            curFile = new CurrentFile(chapidx, chaps[chapidx])
+            curlsample = chaps[chapidx].endTime * mp3header.sampleRate / 1000
+            // fileNbFrames = 0
+            // fileNbBytes = 0
 
             let splFrames // frames for this split
 
@@ -566,25 +630,32 @@ class Mp3splitter {
               splFrames = [ ...id3frames.next ]
             }
 
+            // TODO: move to curFile
             // Add frames 'Tracknumber, 'TotalTracks', 'Track Title'
             splFrames.push(this.id3v2.renderFrame('TRCK', `${chapidx + 1}/${chaps.length}`))
-            const tit2 = chap.subFrames.find(f => f.id === 'TIT2')
+            const tit2 = chaps[chapidx].subFrames.find(f => f.id === 'TIT2')
             if (tit2) {
               splFrames.push(this.id3v2.renderFrame('TIT2', tit2.data))
             }
 
             // write tag
             const rawid3 = this.id3v2.renderTag(splFrames)
-            fs.writeSync(this.ofd, rawid3)
+            curFile.push(rawid3)
           }
 
-          fs.writeSync(this.ofd, buf)
-          fs.writeSync(this.ofd, mp3frame)
+          curFile.push(mp3header.raw)
+          curFile.push(mp3frame)
           cursample += mp3header.samplesPerFrame
+          // fileNbFrames++
+          // fileNbBytes += mp3header.frameSize
         } else {
           this.infile.rewind(4)
         }
       }
+    }
+    // EOF
+    if (curFile) {
+      curFile.save()
     }
   }
 }
