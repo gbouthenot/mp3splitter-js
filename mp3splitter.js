@@ -489,7 +489,7 @@ class U8Array {
   }
 }
 
-class CurrentFile {
+class Segment {
   constructor (num, chaps, id3frames) {
     this.num = num // file number (start at 0)
     this.chaps = chaps // all chapters
@@ -580,8 +580,8 @@ class Mp3splitter {
     const chaps = []
     let chapidx = -1
     let cursample = 0
-    let curlsample = -1
-    let curFile = null
+    let segLastSpl = -1
+    let segment = null
 
     const id3frames = { first: [], next: [] }
 
@@ -654,16 +654,16 @@ class Mp3splitter {
           this.infile.getNextByte()
           const mp3frame = this.infile.getBytes(mp3header.frameSize - 4)
 
-          if (cursample > curlsample && chaps[++chapidx]) {
-            if (curFile) {
-              curFile.save()
+          if (cursample > segLastSpl && chaps[++chapidx]) {
+            if (segment) {
+              segment.save()
             }
 
-            curFile = new CurrentFile(chapidx, chaps, id3frames)
-            curlsample = chaps[chapidx].endTime * mp3header.sampleRate / 1000
+            segment = new Segment(chapidx, chaps, id3frames)
+            segLastSpl = chaps[chapidx].endTime * mp3header.sampleRate / 1000
           }
 
-          curFile.push(mp3header, mp3frame)
+          segment.push(mp3header, mp3frame)
           cursample += mp3header.samplesPerFrame
         } else {
           this.infile.rewind(4)
@@ -671,8 +671,8 @@ class Mp3splitter {
       }
     }
     // EOF
-    if (curFile) {
-      curFile.save()
+    if (segment) {
+      segment.save()
     }
   }
 }
