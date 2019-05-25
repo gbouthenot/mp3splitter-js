@@ -490,16 +490,14 @@ class U8Array {
 }
 
 class CurrentFile {
-  // this.num : file number (start at 0)
-  // this.buf : U8Array
-  // this.chap : this chapter
-  // this.chaps : all chapters
+  constructor (num, chaps, id3frames) {
+    this.num = num // file number (start at 0)
+    this.chaps = chaps // all chapters
+    this.chap = chaps[num] // this chapter
+    this.id3frames = id3frames // [first:[], next:[]] frames
+    this.buf = new U8Array() //  U8Array
 
-  constructor (num, chaps) {
-    this.num = num
-    this.chaps = chaps
-    this.chap = chaps[num]
-    this.buf = new U8Array()
+    this.tag()
   }
 
   push (arr) {
@@ -518,6 +516,34 @@ class CurrentFile {
     fn += '.mp3'
     return fn
   }
+
+  /**
+   * Render the tag and push it to the buffer
+   */
+  tag () {
+    const id3v2 = new Id3v2()
+
+    let splFrames // frames for this split
+
+    // clone the array because we are going to add frames
+    if (this.num === 0) {
+      splFrames = [ ...this.id3frames.first ]
+    } else {
+      splFrames = [ ...this.id3frames.next ]
+    }
+
+    // Add frames 'Tracknumber, 'TotalTracks', 'Track Title'
+    splFrames.push(id3v2.renderFrame('TRCK', `${this.num + 1}/${this.chaps.length}`))
+    const tit2 = this.chap.subFrames.find(f => f.id === 'TIT2')
+    if (tit2) {
+      splFrames.push(id3v2.renderFrame('TIT2', tit2.data))
+    }
+
+    // write tag
+    const rawid3 = id3v2.renderTag(splFrames)
+    this.buf.push(rawid3)
+  }
+
 
   /**
    * Create a new file for writing
@@ -629,30 +655,10 @@ class Mp3splitter {
               curFile.save()
             }
 
-            curFile = new CurrentFile(chapidx, chaps)
+            curFile = new CurrentFile(chapidx, chaps, id3frames)
             curlsample = chaps[chapidx].endTime * mp3header.sampleRate / 1000
             // fileNbFrames = 0
             // fileNbBytes = 0
-
-            let splFrames // frames for this split
-
-            if (chapidx === 0) {
-              splFrames = [ ...id3frames.first ]
-            } else {
-              splFrames = [ ...id3frames.next ]
-            }
-
-            // TODO: move to curFile
-            // Add frames 'Tracknumber, 'TotalTracks', 'Track Title'
-            splFrames.push(this.id3v2.renderFrame('TRCK', `${chapidx + 1}/${chaps.length}`))
-            const tit2 = chaps[chapidx].subFrames.find(f => f.id === 'TIT2')
-            if (tit2) {
-              splFrames.push(this.id3v2.renderFrame('TIT2', tit2.data))
-            }
-
-            // write tag
-            const rawid3 = this.id3v2.renderTag(splFrames)
-            curFile.push(rawid3)
           }
 
           curFile.push(mp3header.raw)
