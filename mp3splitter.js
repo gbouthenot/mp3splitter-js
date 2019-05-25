@@ -496,12 +496,16 @@ class CurrentFile {
     this.chap = chaps[num] // this chapter
     this.id3frames = id3frames // [first:[], next:[]] frames
     this.buf = new U8Array() //  U8Array
+    this.nbFrames = 0 // number of frames for this segment
+    this.nbBytes = 0 // total frame size for this segment
 
     this.tag()
   }
 
-  push (arr) {
-    this.buf.push(arr)
+  push (header, data) {
+    this.buf.blocks.push(header.raw, data)
+    this.nbFrames++
+    this.nbBytes += header.frameSize
   }
 
   getFilename () {
@@ -657,15 +661,10 @@ class Mp3splitter {
 
             curFile = new CurrentFile(chapidx, chaps, id3frames)
             curlsample = chaps[chapidx].endTime * mp3header.sampleRate / 1000
-            // fileNbFrames = 0
-            // fileNbBytes = 0
           }
 
-          curFile.push(mp3header.raw)
-          curFile.push(mp3frame)
+          curFile.push(mp3header, mp3frame)
           cursample += mp3header.samplesPerFrame
-          // fileNbFrames++
-          // fileNbBytes += mp3header.frameSize
         } else {
           this.infile.rewind(4)
         }
