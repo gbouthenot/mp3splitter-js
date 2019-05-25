@@ -490,26 +490,33 @@ class U8Array {
 }
 
 class CurrentFile {
-  // this.buf
-  // this.filename
+  // this.num : file number (start at 0)
+  // this.buf : U8Array
+  // this.chap : this chapter
+  // this.chaps : all chapters
 
-  constructor (num, chap) {
+  constructor (num, chaps) {
+    this.num = num
+    this.chaps = chaps
+    this.chap = chaps[num]
     this.buf = new U8Array()
+  }
 
-    num++
-    const tit2 = chap.subFrames.find(f => f.id === 'TIT2')
+  push (arr) {
+    this.buf.push(arr)
+  }
+
+  getFilename () {
+    // filename
+    const num = this.num + 1
+    const tit2 = this.chap.subFrames.find(f => f.id === 'TIT2')
     const numpadded = `00${num}`.slice(-(Math.max(3, num.toString().length)))
-
     let fn = numpadded
     if (tit2) {
       fn += `-${tit2.data}`
     }
     fn += '.mp3'
-    this.filename = fn
-  }
-
-  push (arr) {
-    this.buf.push(arr)
+    return fn
   }
 
   /**
@@ -517,8 +524,11 @@ class CurrentFile {
    * chap: use endtime and subframes
    */
   save () {
-    console.log(`saving ${this.filename}`)
-    const ofd = fs.openSync(this.filename, 'w')
+    const fn = this.getFilename()
+
+    // save new file
+    console.log(`saving ${fn}`)
+    const ofd = fs.openSync(fn, 'w')
     fs.writeSync(ofd, this.buf.render())
     fs.closeSync(ofd)
   }
@@ -549,8 +559,8 @@ class Mp3splitter {
       // const pos = this.fBufFilePos + this.fBufPos - 1
       // console.log(`testing byte=${b} at ${pos} (0x${pos.toString(16)})`)
       if (b === 73) {
+        // Possible ID3V2 header
         // console.log(`possible ID3V2 frame header at ${pos} (0x${pos.toString(16)})`)
-
         let buf = this.infile.getBytes(10)
         const id3v2header = this.id3v2.checkHeader(buf)
         if (id3v2header) {
@@ -600,6 +610,8 @@ class Mp3splitter {
           }
         }
       } else if (b === 255) {
+        // Possible MP3 frame header
+
         // const pos = this.fBufFilePos + this.fBufPos - 1
         // console.log(`possible mp3 frame header at ${pos} (0x${pos.toString(16)})`)
 
@@ -617,7 +629,7 @@ class Mp3splitter {
               curFile.save()
             }
 
-            curFile = new CurrentFile(chapidx, chaps[chapidx])
+            curFile = new CurrentFile(chapidx, chaps)
             curlsample = chaps[chapidx].endTime * mp3header.sampleRate / 1000
             // fileNbFrames = 0
             // fileNbBytes = 0
