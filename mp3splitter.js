@@ -488,40 +488,30 @@ class Mp3 {
 //   }
 // }
 
-class U8Array {
-  constructor () {
-    this.blocks = []
-  }
-
-  push (block) {
-    this.blocks.push(block)
-  }
-
-  render () {
-    let newlen = this.blocks.reduce((len, elem) => len + elem.length, 0)
-    const buf = new Uint8Array(newlen)
-    this.blocks.reduce((acc, elem) => {
-      buf.set(elem, acc)
-      return acc + elem.length
-    }, 0)
-    return buf
-  }
-}
-
 class Segment {
   constructor (num, chaps, id3frames, xing) {
     this.num = num // file number (start at 0)
     this.chaps = chaps // all chapters
     this.chap = chaps[num] // this chapter
     this.id3frames = id3frames // [first:[], next:[]] frames
-    this.buf = new U8Array() //  U8Array
+    this.buf = []
     this.framesLen = []
     this.xing = xing // [mp3header, mp3data]
   }
 
   push (header, data) {
-    this.buf.blocks.push(header.raw, data)
+    this.buf.push(header.raw, data)
     this.framesLen.push(header.frameSize)
+  }
+
+  renderBuf () {
+    let newlen = this.buf.reduce((len, elem) => len + elem.length, 0)
+    const buf = new Uint8Array(newlen)
+    this.buf.reduce((acc, elem) => {
+      buf.set(elem, acc)
+      return acc + elem.length
+    }, 0)
+    return buf
   }
 
   getFilename () {
@@ -561,7 +551,7 @@ class Segment {
 
     // prepend tag to buffer
     const rawid3 = id3v2.renderTag(splFrames)
-    this.buf.blocks.unshift(rawid3)
+    this.buf.unshift(rawid3)
   }
 
   prependXing () {
@@ -587,8 +577,8 @@ class Segment {
     }
 
     // prepend Xing frame to buffer
-    this.buf.blocks.unshift(frame)
-    this.buf.blocks.unshift(header.raw)
+    this.buf.unshift(frame)
+    this.buf.unshift(header.raw)
   }
 
   // not yet used
@@ -628,7 +618,7 @@ class Segment {
     // save new file
     console.log(`saving ${fn}`)
     const ofd = fs.openSync(fn, 'w')
-    fs.writeSync(ofd, this.buf.render())
+    fs.writeSync(ofd, this.renderBuf())
     fs.closeSync(ofd)
   }
 }
