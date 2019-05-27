@@ -452,8 +452,12 @@ class Mp3 {
   }
 
   isXing (header, frame) {
-    const str = String.fromCharCode.apply(0, frame.slice(header.xingOffset, header.xingOffset + 4))
-    return str === 'Xing' || str === 'Info'
+    const c1 = frame[header.xingOffset]
+    if (c1 === 73 || c1 === 88) { // 'X' or 'I' (optimize)
+      const str = String.fromCharCode.apply(0, frame.slice(header.xingOffset, header.xingOffset + 4))
+      return str === 'Xing' || str === 'Info'
+    }
+    return false
   }
 }
 
