@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 /* eslint-disable camelcase, no-multiple-empty-lines */
 
-// http://id3.org/id3v2.4.0-frames
-// http://id3.org/id3v2-chapters-1.0
+/*
+mp3splitter-js
+Version: 1.1
+Author: Gilles Bouthenot
+https://github.com/gbouthenot/mp3splitter-js
 
+ID3:
+  - http://id3.org/id3v2.4.0-frames
+  - http://id3.org/id3v2-chapters-1.0
+VBR header:
+  - https://www.codeproject.com/Articles/8295/MPEG-Audio-Frame-Header
+  - http://gabriel.mp3-tech.org/mp3infotag.html
+*/
 
 const fs = require('fs')
-
 
 class Cliapp {
   constructor (argv) {
@@ -270,8 +279,8 @@ class Id3v2 {
       [data, buf] = this.readNTString(buf)
     } else {
       // TODO Handle other frames
-      console.log(`TAG: ${id}`, buf.reduce((a, b) => b >= 32 && b <= 127 ? a + String.fromCharCode(b) : `${a}%${b.toString(16)} `, ''))
-      console.log('raw:', buf.reduce((a, b) => `${a}%${b.toString(16)} `, ''))
+      // console.log(`TAG: ${id}`, buf.reduce((a, b) => b >= 32 && b <= 127 ? a + String.fromCharCode(b) : `${a}%${b.toString(16)} `, ''))
+      // console.log('raw:', buf.reduce((a, b) => `${a}%${b.toString(16)} `, ''))
     }
     frame.data.parsed = data
     return frame
@@ -425,10 +434,11 @@ class Mp3 {
     // IIJJKLMM
     b = buf[3]
 
-    // II
+    // II: mono/stereo
     v = (b & 0xc0) >> 10
     header.channelMode = ['Stereo', 'Joint stereo', 'Dual channel', 'Single channel'][v]
-    // console.log(`ii=${v}: channelMode=${header.channelMode}`)
+    header.xingOffset = [[17, 17, 17, 9], [], [17, 17, 17, 9], [32, 32, 32, 17]][bb][v]
+    // console.log(`ii=${v}: channelMode=${header.channelMode} xingOffset=${header.xingOffset}`)
 
     // JJ Joint Stereo extension
 
@@ -439,6 +449,11 @@ class Mp3 {
     // MM: emphasis
 
     return header
+  }
+
+  isXing (header, frame) {
+    const str = String.fromCharCode.apply(0, frame.slice(header.xingOffset, header.xingOffset + 4))
+    return str === 'Xing' || str === 'Info'
   }
 }
 
@@ -490,22 +505,19 @@ class U8Array {
 }
 
 class Segment {
-  constructor (num, chaps, id3frames) {
+  constructor (num, chaps, id3frames, xing) {
     this.num = num // file number (start at 0)
     this.chaps = chaps // all chapters
     this.chap = chaps[num] // this chapter
     this.id3frames = id3frames // [first:[], next:[]] frames
     this.buf = new U8Array() //  U8Array
-    this.nbFrames = 0 // number of frames for this segment
-    this.nbBytes = 0 // total frame size for this segment
-
-    this.tag()
+    this.framesLen = []
+    this.xing = xing // [mp3header, mp3data]
   }
 
   push (header, data) {
     this.buf.blocks.push(header.raw, data)
-    this.nbFrames++
-    this.nbBytes += header.frameSize
+    this.framesLen.push(header.frameSize)
   }
 
   getFilename () {
@@ -524,7 +536,7 @@ class Segment {
   /**
    * Render the tag and push it to the buffer
    */
-  tag () {
+  prependTag () {
     const id3v2 = new Id3v2()
 
     let splFrames // frames for this split
@@ -543,9 +555,56 @@ class Segment {
       splFrames.push(id3v2.renderFrame('TIT2', tit2.data))
     }
 
-    // write tag
+    // prepend tag to buffer
     const rawid3 = id3v2.renderTag(splFrames)
-    this.buf.push(rawid3)
+    this.buf.blocks.unshift(rawid3)
+  }
+
+  prependXing () {
+    if (!this.xing) {
+      // no xing frame
+      return
+    }
+    const [header, frame] = this.xing
+    const off = header.xingOffset
+
+    const nbframes = this.framesLen.length
+    const nbbytes = this.framesLen.reduce((acc, e) => acc + e, 0)
+
+    const toc = this.getToc()
+    const useToc = (toc.length === 100) && (header.frameSize >= (116 + header.xingOffset))
+    // data will store, flags, nbFrames, nbBytes
+    const data = [0, 0, 0, 3 + 4 * useToc]
+    data.push((nbframes & 0xff000000) >> 24, (nbframes & 0xff0000) >> 16, (nbframes & 0xff00) >> 8, nbframes & 0xff)
+    data.push((nbbytes & 0xff000000) >> 24, (nbbytes & 0xff0000) >> 16, (nbbytes & 0xff00) >> 8, nbbytes & 0xff)
+    frame.set(data, off + 4)
+    if (useToc) {
+      frame.set(toc, off + 16)
+    }
+
+    // prepend Xing frame to buffer
+    this.buf.blocks.unshift(frame)
+    this.buf.blocks.unshift(header.raw)
+  }
+
+  // not yet used
+  getToc () {
+    const nbframes = this.framesLen.length
+    const nbbytes = this.framesLen.reduce((acc, e) => acc + e, 0)
+    // console.log(nbframes.toString(16), nbbytes.toString(16))
+
+    const toc = []
+    let cursize = 0
+    let nxt = 0
+    this.framesLen.forEach((len, i) => {
+      if (i >= nxt) {
+        nxt += nbframes / 100
+        toc.push(Math.floor(255 * cursize / nbbytes))
+      }
+      cursize += len
+    })
+    // toc.forEach(r => console.log(r.toString(16)))
+    return toc
   }
 
 
@@ -555,6 +614,12 @@ class Segment {
    */
   save () {
     const fn = this.getFilename()
+
+    // 2nd data
+    this.prependXing()
+
+    // 1st data
+    this.prependTag()
 
     // save new file
     console.log(`saving ${fn}`)
@@ -584,6 +649,7 @@ class Mp3splitter {
     let segment = null
 
     const id3frames = { first: [], next: [] }
+    let xingFrame = null
 
     while ((b = this.infile.getNextByte()) !== false) {
       // const pos = this.fBufFilePos + this.fBufPos - 1
@@ -614,7 +680,7 @@ class Mp3splitter {
               rSize -= 10
               const frameHeader = this.id3v2.readFrameHeader(buf)
               if (!frameHeader) {
-                console.log(buf)
+                console.error(buf)
                 throw new Error('frame header bad format')
               }
               // console.log('Frame header', frameHeader)
@@ -623,7 +689,7 @@ class Mp3splitter {
               buf = this.infile.getBytes(frameHeader.size)
               rSize -= frameHeader.size
               const frame = this.id3v2.readFrameData(frameHeader, buf)
-              console.log(frame.header.id, frame.data.parsed)
+              // console.log(frame.header.id, frame.data.parsed)
 
               if (frameHeader.id === 'CHAP') {
                 // not kept, but stored separately
@@ -654,12 +720,21 @@ class Mp3splitter {
           this.infile.getNextByte()
           const mp3frame = this.infile.getBytes(mp3header.frameSize - 4)
 
+          if (this.mp3.isXing(mp3header, mp3frame)) {
+            if (!xingFrame) {
+              // store only the first.
+              xingFrame = [mp3header, mp3frame]
+            }
+            // Do not store this frame
+            continue
+          }
+
           if (cursample > segLastSpl && chaps[++chapidx]) {
             if (segment) {
               segment.save()
             }
 
-            segment = new Segment(chapidx, chaps, id3frames)
+            segment = new Segment(chapidx, chaps, id3frames, xingFrame)
             segLastSpl = chaps[chapidx].endTime * mp3header.sampleRate / 1000
           }
 

@@ -1,19 +1,24 @@
-# mp3splitter
-split mp3 file by integrated chapters
+# Mp3splitter-js #
+Split mp3 file by integrated chapters
+
+The chapter information MUSE be included in ID3v2 tag.
 
 ## Usage ##
-node mp3splitter.js filetosplit.mp3
+```node mp3splitter.js filetosplit.mp3```
 
 ## Dependencies ##
 - [NodeJS](https://nodejs.org/en/download/)
 - No javascript dependencies
 
-Tested with nodejs v10.15.1 on linux x64.
+## Compatiblility ##
+Tested with nodejs v10.15.1 on linux x64 (should work on other platforms)
 
-Should work on other platforms, too.
+## Features##
 
-## ID3V2 tags handling ##
+### VBR Information ###
+The generated files will include a VBR (ou CBR) frame header (a.k.a Xing header)
 
+### ID3V2 tags handling ###
 Splitted files keep the original tags except:
 - Chapter information
 - Embedded cover (only the first splitted file will have one)
@@ -26,6 +31,4 @@ The files gain the tags:
 Information used to split MUST be embedded in ID3V2 tags at the start of the file.
 
 ## Known issues ##
-The MP3 files keep their VBR header, they will be incorrect.
-
-If you use foobar2000, you should do Utilities -> rebuild mp3 stream and utilities -> Fix VBR header to have proper length information.
+MP3 bit reservoir is not handled. This tool will not produce bit-perfect cuts. Use pcutmp3 if you want to achieve true gapless. This means that if you play the files produced in a gapless player, you may heard a very small 'click' between files. This is of course only relevant for cutting mp3 contained music.
