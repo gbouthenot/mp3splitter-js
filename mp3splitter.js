@@ -3,7 +3,7 @@
 
 /*
 mp3splitter-js
-Version: 1.1
+Version: 1.2.1
 Author: Gilles Bouthenot
 https://github.com/gbouthenot/mp3splitter-js
 
