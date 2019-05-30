@@ -19,14 +19,19 @@ Tested with nodejs v10.15.1 on linux x64 (should work on other platforms)
 The generated files will include a VBR (ou CBR) frame header (a.k.a _Xing header_)
 
 ### ID3V2 tags handling ###
-Splitted files keep the original tags except:
-- Chapter information
+ID3v2.3 tag is upgraded to ID3v2.4
+
+Splitted files keep their original informations except:
+- Chapter information (since the files are splitted)
 - Embedded cover (only the first splitted file will have one)
 
-The generated files will have those additional tags:
+The generated files will have those additional informations:
 - Track number
 - Total tracks
 - Track title
 
 ## Known issues ##
 _MP3 bit reservoir is not handled_. This tool will not produce bit-perfect cuts. Use [pcutmp3](https://bitbucket.org/gbouthenot/pcutmp3/) if you want to achieve true gapless cuts. This means that if you play the files produced in a gapless player, you may heard a very small 'click' between files. This is of course only relevant for cutting mp3 contained music.
+
+## Thanks ##
+- mqus

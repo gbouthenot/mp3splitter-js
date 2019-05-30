@@ -3,12 +3,13 @@
 
 /*
 mp3splitter-js
-Version: 1.2.1
+Version: 1.3.0
 Author: Gilles Bouthenot
 https://github.com/gbouthenot/mp3splitter-js
 
 ID3:
   - http://id3.org/id3v2.4.0-frames
+  - http://id3.org/d3v2.3.0
   - http://id3.org/id3v2-chapters-1.0
 VBR header:
   - https://www.codeproject.com/Articles/8295/MPEG-Audio-Frame-Header
@@ -87,7 +88,9 @@ class Filereader {
       // console.log('bufPos', this.fBufPos)
 
       if (this.fBufAvail < (n - 1)) {
-        throw new Error('TODO: Buffer too small')
+        console.warn('Reached end of file !')
+        this.fBufAvail = 0
+        return this.fBuf.slice(this.fBufPos - 1, this.fBufPos + n - 1)
       }
     }
     const retbuf = this.fBuf.slice(this.fBufPos - 1, this.fBufPos + n - 1)
@@ -129,6 +132,19 @@ class Id3v2 {
     return size
   }
 
+  /**
+   * read a unsynched int32 and convert the buffer to synchsafe Int32
+   * return int, MODIFY buf
+   */
+  convertInt32toSyncsafe (buf) {
+    const len = this.readInt32(buf)
+    buf[0] = (len & 0xfe00000) >> 21
+    buf[1] = (len & 0x1fc000) >> 14
+    buf[2] = (len & 0x3f80) >> 7
+    buf[3] = len & 0x7f
+    return len
+  }
+
   readNTString (buf) {
     const idx = buf.indexOf(0)
     if (idx === -1) {
@@ -157,7 +173,8 @@ class Id3v2 {
     const fullheader = {
       raw: buf,
       parsed: {
-        version: null,
+        versionStr: null,
+        versionMaj: null,
         size: null,
         totalsize: null,
         flags: {
@@ -179,7 +196,13 @@ class Id3v2 {
     if (b0 === 255 || b1 === 255) {
       return false
     }
-    header.version = `ID3v2.${String.fromCharCode(b0 + 48)}.${String.fromCharCode(b1 + 48)}`
+    header.versionStr = `ID3v2.${String.fromCharCode(b0 + 48)}.${String.fromCharCode(b1 + 48)}`
+    header.versionMaj = b0
+
+    if (b0 !== 3 && b0 !== 4) {
+      console.warn('Only support ID3v2.3 and ID3v2.4', header.versionStr)
+      return false
+    }
 
     // abcd0000
     b0 = buf[5]
@@ -208,7 +231,7 @@ class Id3v2 {
   * Size      4 * %0xxxxxxx
   * Flags         %0abc0000 %0h00kmnp
   */
-  readFrameHeader (buf) {
+  readFrameHeader (buf, tagheader) {
     let header = {
       raw: buf,
       id: null,
@@ -233,10 +256,16 @@ class Id3v2 {
 
     header.id = String.fromCharCode(b0, b1, b2, b3)
 
-    header.size = this.readSyncsafeInt32(buf.slice(4, 8))
-    if (header.size === false) {
-      return false
+    if (tagheader.parsed.versionMaj === 3) {
+      // id3v2.3 to id3v2.4
+      header.size = this.convertInt32toSyncsafe(buf.subarray(4, 8))
+    } else {
+      header.size = this.readSyncsafeInt32(buf.slice(4, 8))
+      if (header.size === false) {
+        return false
+      }
     }
+
     header.totalsize = header.size + 10;
 
     // flags
@@ -257,14 +286,14 @@ class Id3v2 {
    * Parse frame according to header
    * return Object frame
    */
-  readFrameData (header, buf) {
+  readFrameData (header, buf, tagheader) {
     const frame = { header, data: { parsed: null, raw: buf } }
     const id = header.id
     let data
     if (id === 'APIC') {
       data = `(${buf.length} bytes)`
     } else if (id === 'CHAP') {
-      data = this.readTagCHAP(buf)
+      data = this.readTagCHAP(buf, tagheader)
     } else if (id === 'TXXX') {
       // const encoding = buf[0]
       buf = buf.slice(1)
@@ -286,7 +315,7 @@ class Id3v2 {
     return frame
   }
 
-  readTagCHAP (buf) {
+  readTagCHAP (buf, tagheader) {
     const data = {
       id: null,
       startTime: null,
@@ -298,9 +327,9 @@ class Id3v2 {
     data.endTime = this.readInt32(buf.slice(4))
     buf = buf.slice(16)
     while (buf.length > 10) {
-      const sfheader = this.readFrameHeader(buf)
+      const sfheader = this.readFrameHeader(buf, tagheader)
       const sfdata = buf.slice(10, sfheader.size + 10)
-      data.subFrames.push({ id: sfheader.id, data: this.readFrameData(sfheader, sfdata).data.parsed })
+      data.subFrames.push({ id: sfheader.id, data: this.readFrameData(sfheader, sfdata, tagheader).data.parsed })
       buf = buf.slice(sfheader.size + 10)
     }
     return data
@@ -581,7 +610,6 @@ class Segment {
     this.buf.unshift(header.raw)
   }
 
-  // not yet used
   getToc () {
     const nbframes = this.framesLen.length
     const nbbytes = this.framesLen.reduce((acc, e) => acc + e, 0)
@@ -672,9 +700,9 @@ class Mp3splitter {
             } else {
               buf = this.infile.getBytes(10)
               rSize -= 10
-              const frameHeader = this.id3v2.readFrameHeader(buf)
+              const frameHeader = this.id3v2.readFrameHeader(buf, id3v2header)
               if (!frameHeader) {
-                console.error(buf)
+                console.error('Id3v2 frame header:', buf)
                 throw new Error('frame header bad format')
               }
               // console.log('Frame header', frameHeader)
@@ -682,7 +710,7 @@ class Mp3splitter {
               this.infile.getNextByte()
               buf = this.infile.getBytes(frameHeader.size)
               rSize -= frameHeader.size
-              const frame = this.id3v2.readFrameData(frameHeader, buf)
+              const frame = this.id3v2.readFrameData(frameHeader, buf, id3v2header)
               // console.log(frame.header.id, frame.data.parsed)
 
               if (frameHeader.id === 'CHAP') {
@@ -723,13 +751,17 @@ class Mp3splitter {
             continue
           }
 
-          if (cursample > segLastSpl && chaps[++chapidx]) {
-            if (segment) {
-              segment.save()
+          if (cursample > segLastSpl) {
+            if (chaps.length === 0) {
+              throw new Error('No chapter information found in ID3V2 tag')
+            } else if (chaps[++chapidx]) {
+              // next chapter is present. Split.
+              if (segment) {
+                segment.save()
+              }
+              segment = new Segment(chapidx, chaps, id3frames, xingFrame)
+              segLastSpl = chaps[chapidx].endTime * mp3header.sampleRate / 1000
             }
-
-            segment = new Segment(chapidx, chaps, id3frames, xingFrame)
-            segLastSpl = chaps[chapidx].endTime * mp3header.sampleRate / 1000
           }
 
           segment.push(mp3header, mp3frame)
