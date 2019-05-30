@@ -1,7 +1,7 @@
 # Mp3splitter-js #
 Split mp3 file by integrated chapters
 
-__Chapter information MUST be included in ID3v2 tag__
+__Chapter information MUST be included in ID3v2.3 or ID3v2.4 tag__
 
 ## Usage ##
 ```node mp3splitter.js filetosplit.mp3```

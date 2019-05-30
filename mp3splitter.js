@@ -3,7 +3,7 @@
 
 /*
 mp3splitter-js
-Version: 1.3.0
+Version: 1.4.0
 Author: Gilles Bouthenot
 https://github.com/gbouthenot/mp3splitter-js
 
@@ -145,25 +145,6 @@ class Id3v2 {
     return len
   }
 
-  readNTString (buf) {
-    const idx = buf.indexOf(0)
-    if (idx === -1) {
-      throw new Error('Cannot read Null Terminated String')
-    }
-    return [
-      buf.slice(0, idx).reduce((a, b) => a + String.fromCharCode(b), ''),
-      buf.slice(idx + 1)
-    ]
-  }
-
-  readString (buf, len) {
-    let str = ''
-    for (let i = 0; i < len; i++) {
-      str += String.fromCharCode(buf[i])
-    }
-    return str
-  }
-
   /**
    * Check if buf is a correct Id3v2 header
    * @return false or Object header
@@ -283,6 +264,59 @@ class Id3v2 {
   }
 
   /**
+   * Read null-terminated string
+   * Handle there encodings:
+   * ISO-8859-1
+   * UTF-16 with/without BOM (if BOM is not present, assume Big Endian)
+   * UTF-8
+   * return { str: string, offset: off }
+   */
+  readEncodedString (enc, buf, off) {
+    let c
+    let str = ''
+    let littleEndian = false
+    if (enc === 0) {
+      for (; off < buf.length; off++) {
+        c = buf[off]
+        if (c === 0) {
+          off++
+          break
+        }
+        str += String.fromCharCode(c)
+      }
+    } else if (enc === 1 || enc === 2) {
+      for (; off < buf.length; off += 2) {
+        if (littleEndian) {
+          c = (buf[off + 1] << 8) + buf[off]
+        } else {
+          c = (buf[off] << 8) + buf[off + 1]
+        }
+        if (c === 0) {
+          off += 2
+          break
+        } else if (c === 65279) {
+          // BOM: good !
+        } else if (c === 65534) {
+          // BOM change LE <-> BE
+          littleEndian = !littleEndian
+        } else {
+          str += String.fromCharCode(c)
+        }
+      }
+    } else if (enc === 3) {
+      const part = buf.slice(off)
+      const idx = part.indexOf(0)
+      str = Buffer.from(part.slice(0, idx)).toString('utf8')
+      off += idx + 1
+    } else {
+      console.warn(`Bad encoding ${enc}, off=${off}, buf=`, buf)
+    }
+    return { str, offset: off }
+  }
+
+
+
+  /**
    * Parse frame according to header
    * return Object frame
    */
@@ -290,28 +324,24 @@ class Id3v2 {
     const frame = { header, data: { parsed: null, raw: buf } }
     const id = header.id
     let data
+    let parsed
     if (id === 'APIC') {
-      data = `(${buf.length} bytes)`
+      parsed = `(${buf.length} bytes)`
     } else if (id === 'CHAP') {
-      data = this.readTagCHAP(buf, tagheader)
+      parsed = this.readTagCHAP(buf, tagheader)
     } else if (id === 'TXXX') {
-      // const encoding = buf[0]
-      buf = buf.slice(1)
-      // TODO: handle UTF-8 and UTF-16 encodings
-      data = [];
-      [data[0], buf] = this.readNTString(buf)
-      data[1] = this.readString(buf, buf.length)
+      const encoding = buf[0]
+      data = this.readEncodedString(encoding, buf, 1)
+      parsed = [data.str, this.readEncodedString(encoding, buf, data.offset).str]
     } else if (id[0] === 'T') {
-      // const encoding = buf[0]
-      buf = buf.slice(1);
-      // TODO: handle UTF-8 and UTF-16 encodings
-      [data, buf] = this.readNTString(buf)
+      const encoding = buf[0]
+      parsed = this.readEncodedString(encoding, buf, 1).str
     } else {
       // TODO Handle other frames
       // console.log(`TAG: ${id}`, buf.reduce((a, b) => b >= 32 && b <= 127 ? a + String.fromCharCode(b) : `${a}%${b.toString(16)} `, ''))
       // console.log('raw:', buf.reduce((a, b) => `${a}%${b.toString(16)} `, ''))
     }
-    frame.data.parsed = data
+    frame.data.parsed = parsed
     return frame
   }
 
@@ -321,8 +351,9 @@ class Id3v2 {
       startTime: null,
       endTime: null,
       subFrames: []
-    };
-    [data.id, buf] = this.readNTString(buf)
+    }
+    const retstr = this.readEncodedString(0, buf, 0);
+    [data.id, buf] = [retstr.str, buf.slice(retstr.offset)]
     data.startTime = this.readInt32(buf)
     data.endTime = this.readInt32(buf.slice(4))
     buf = buf.slice(16)
@@ -711,6 +742,7 @@ class Mp3splitter {
               buf = this.infile.getBytes(frameHeader.size)
               rSize -= frameHeader.size
               const frame = this.id3v2.readFrameData(frameHeader, buf, id3v2header)
+              // to show ID3 data, uncomment the following line
               // console.log(frame.header.id, frame.data.parsed)
 
               if (frameHeader.id === 'CHAP') {
