@@ -733,8 +733,11 @@ class Mp3splitter {
               rSize -= 10
               const frameHeader = this.id3v2.readFrameHeader(buf, id3v2header)
               if (!frameHeader) {
-                console.error('Id3v2 frame header:', buf)
-                throw new Error('frame header bad format')
+                console.log(`rSize=${rSize} Id3v2 frame header BAD FORMAT:`, buf)
+                rSize += 9
+                this.infile.rewind(10)
+                continue
+                // throw new Error('frame header bad format')
               }
               // console.log('Frame header', frameHeader)
 
