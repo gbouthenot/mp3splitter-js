@@ -239,7 +239,7 @@ class Id3v2 {
 
     if (tagheader.parsed.versionMaj === 3) {
       // id3v2.3 to id3v2.4
-      header.size = this.convertInt32toSyncsafe(buf.subarray(4, 8))
+      header.size = this.convertInt32toSyncsafe(buf.subarray(4, 8)) // must use subarray
     } else {
       header.size = this.readSyncsafeInt32(buf.slice(4, 8))
       if (header.size === false) {
