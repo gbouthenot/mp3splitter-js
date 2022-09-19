@@ -115,21 +115,11 @@ class Id3v2 {
       // not a 32 bit synchsafe integer
       return false
     }
-
-    let size = (buf[0] & 0x7f) << 21
-    size += (buf[1] & 0x7f) << 14
-    size += (buf[2] & 0x7f) << 7
-    size += (buf[3] & 0x7f)
-
-    return size
+    return ((buf[0] & 0x7f) << 21) + ((buf[1] & 0x7f) << 14) + ((buf[2] & 0x7f) << 7) + (buf[3] & 0x7f)
   }
 
   readInt32 (buf) {
-    let size = buf[0] << 24
-    size += buf[1] << 16
-    size += buf[2] << 8
-    size += buf[3]
-    return size
+    return (buf[0] << 24) + (buf[1] << 16) + (buf[2] << 8) + buf[3]
   }
 
   /**
@@ -150,7 +140,6 @@ class Id3v2 {
    * @return false or Object header
    */
   checkHeader (buf) {
-    let b0, b1
     const fullheader = {
       raw: buf,
       parsed: {
@@ -172,8 +161,8 @@ class Id3v2 {
       return false
     }
     // version
-    b0 = buf[3]
-    b1 = buf[4]
+    let b0 = buf[3]
+    const b1 = buf[4]
     if (b0 === 255 || b1 === 255) {
       return false
     }
@@ -213,7 +202,7 @@ class Id3v2 {
   * Flags         %0abc0000 %0h00kmnp
   */
   readFrameHeader (buf, tagheader) {
-    let header = {
+    const header = {
       raw: buf,
       id: null,
       size: null,
@@ -373,7 +362,7 @@ class Id3v2 {
       (len & 0xfe00000) >> 21, (len & 0x1fc000) >> 14, (len & 0x3f80) >> 7, len & 0x7f,
       0, 0 // flags
     ]
-    const data = [ 0 ] // encoding
+    const data = [0] // encoding
     str.split('').forEach(c => {
       data.push(c.charCodeAt())
     })
@@ -409,15 +398,13 @@ class Id3v2 {
 
 class Mp3 {
   getHeader (buf) {
-    let b, v, bb, cc
-
     const header = { raw: buf }
     if (buf[0] !== 0xff) {
       return false
     }
 
     // AAABBCCD
-    b = buf[1]
+    let b = buf[1]
 
     // AAA
     if ((b & 0xe0) !== 0xe0) {
@@ -426,7 +413,7 @@ class Mp3 {
     }
 
     // BB: MPEG VERSION
-    bb = (b & 0x18) >> 3
+    const bb = (b & 0x18) >> 3
     if (bb === 1) {
       // console.log('mpeg version reserved')
       return false
@@ -435,7 +422,7 @@ class Mp3 {
     // console.log(`bb=${bb}: mpeg version ${header.mpegVersion}`)
 
     // CC: LAYER
-    cc = (b & 6) >> 1
+    const cc = (b & 6) >> 1
     if (cc === 0) {
       // console.log('layer reserved')
       return false
@@ -461,13 +448,13 @@ class Mp3 {
     b = buf[2]
 
     // EEEE
-    v = (b & 0xf0) >> 4
+    let v = (b & 0xf0) >> 4
     const bitratesTb = [
-      [ 0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 1 ],
-      [ 0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 1 ],
-      [ 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 1 ],
-      [ 0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 1 ],
-      [ 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 1 ]
+      [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 1],
+      [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 1],
+      [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 1],
+      [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 1],
+      [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 1]
     ]
     header.bitrate = bitratesTb[[2, 1, 0, 4, 4, 3][(bb < 3) * 3 + cc - 1]][v]
     // console.log(`eeee: ${v}, bb=${bb}, cc=${cc}: bitrate=${header.bitrate}`)
@@ -565,7 +552,7 @@ class Segment {
   }
 
   renderBuf () {
-    let newlen = this.buf.reduce((len, elem) => len + elem.length, 0)
+    const newlen = this.buf.reduce((len, elem) => len + elem.length, 0)
     const buf = new Uint8Array(newlen)
     this.buf.reduce((acc, elem) => {
       buf.set(elem, acc)
@@ -597,9 +584,9 @@ class Segment {
 
     // clone the array because we are going to add frames
     if (this.num === 0) {
-      splFrames = [ ...this.id3frames.first ]
+      splFrames = [...this.id3frames.first]
     } else {
-      splFrames = [ ...this.id3frames.next ]
+      splFrames = [...this.id3frames.next]
     }
 
     // Add frames 'Tracknumber, 'TotalTracks', 'Track Title'
